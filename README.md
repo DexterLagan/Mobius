@@ -1,4 +1,4 @@
-# Mobius
+# Project Mobius
 
 Mobius is a cross-platform desktop app that watches your Downloads folder,
 detects newly completed files, and asks how you'd like to organize them. Move
