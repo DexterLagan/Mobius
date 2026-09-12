@@ -54,7 +54,8 @@ when a `v*` tag is pushed.
 
 ## Status
 
-v0.1.0 is the first functional build. It detects finished downloads with a
+v0.1.1 adds the native About menu and the "Organize existing files" dialog on top
+of v0.1.0, the first functional build. Mobius detects finished downloads with a
 **timed check** (periodic scan); the real-time filesystem watcher is intentionally
 disabled for now and will be enabled after initial testing.
 
