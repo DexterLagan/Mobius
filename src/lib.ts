@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Config, HistoryEntry, MoveOutcome, QueueItem, Status } from "./types";
+import type {
+  Config,
+  HistoryEntry,
+  MoveOutcome,
+  OrganizeRequest,
+  OrganizerItem,
+  QueueItem,
+  Status,
+} from "./types";
 
 export const getConfig = () => invoke<Config>("get_config");
 export const setConfig = (config: Config) => invoke<void>("set_config", { config });
@@ -21,6 +29,11 @@ export const confirmMove = (args: {
     remember: args.remember,
     applyAll: args.applyAll,
   });
+
+export const scanDownloads = () => invoke<OrganizerItem[]>("scan_downloads");
+
+export const organizeFiles = (items: OrganizeRequest[]) =>
+  invoke<MoveOutcome[]>("organize_files", { items });
 
 export function formatBytes(bytes: number): string {
   if (!bytes) return "0 B";

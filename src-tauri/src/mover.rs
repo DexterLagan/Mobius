@@ -152,3 +152,57 @@ fn timestamped_name(file_name: &OsString) -> OsString {
     let stamp = Local::now().format("%Y-%m-%d").to_string();
     OsString::from(format!("{stamp}_{}", file_name.to_string_lossy()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_existing_file() {
+        let root = std::env::temp_dir().join(format!("mobius-test-{}", uuid::Uuid::new_v4()));
+        let destination_dir = root.join("Documents/PDFs");
+        fs::create_dir_all(&destination_dir).unwrap();
+
+        fs::write(destination_dir.join("report.pdf"), b"old").unwrap();
+        let source = root.join("report.pdf");
+        fs::write(&source, b"new").unwrap();
+
+        let outcome = move_file(&source, &destination_dir, "version", false).unwrap();
+        assert!(outcome.moved);
+        assert_eq!(fs::read_to_string(&outcome.destination).unwrap(), "new");
+        let archived = outcome.archived.expect("previous version archived");
+        assert_eq!(fs::read_to_string(&archived).unwrap(), "old");
+        assert!(archived.to_string_lossy().contains("Previous Versions"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn renames_on_second_conflict() {
+        let root = std::env::temp_dir().join(format!("mobius-test-{}", uuid::Uuid::new_v4()));
+        let destination_dir = root.join("Documents/PDFs");
+        fs::create_dir_all(destination_dir.join("Previous Versions")).unwrap();
+        fs::write(destination_dir.join("report.pdf"), b"new").unwrap();
+        fs::write(
+            destination_dir.join("Previous Versions/report.pdf"),
+            b"old1",
+        )
+        .unwrap();
+
+        let source = root.join("report.pdf");
+        fs::write(&source, b"old2").unwrap();
+
+        let outcome = move_file(&source, &destination_dir, "version", false).unwrap();
+        let archived = outcome.archived.expect("archived");
+        assert!(archived.to_string_lossy().ends_with("report_1.pdf"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rejects_parent_traversal() {
+        let watch = Path::new("/tmp/watch");
+        let result = resolve_destination_path(watch, "../outside", false);
+        assert!(result.is_err());
+    }
+}

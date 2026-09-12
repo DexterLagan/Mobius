@@ -55,3 +55,17 @@ export interface MoveOutcome {
   moved: boolean;
   note: string | null;
 }
+
+export interface OrganizerItem {
+  path: string;
+  fileName: string;
+  ext: string;
+  size: number;
+  suggested: string;
+}
+
+export interface OrganizeRequest {
+  path: string;
+  destination: string;
+  remember: boolean;
+}

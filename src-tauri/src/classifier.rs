@@ -82,3 +82,43 @@ pub fn extension_of(name: &str) -> String {
         _ => String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn builtin_destinations() {
+        assert_eq!(builtin_destination("pdf"), "Documents/PDFs");
+        assert_eq!(builtin_destination("docx"), "Documents/Word Files");
+        assert_eq!(builtin_destination("dmg"), "Apps");
+        assert_eq!(builtin_destination("zip"), "Archives");
+        assert_eq!(builtin_destination("zzz"), "Other");
+    }
+
+    #[test]
+    fn rule_overrides_default() {
+        let mut config = Config::default_with_watch_dir(PathBuf::from("/tmp"));
+        assert_eq!(resolve_destination(&config, "pdf"), "Documents/PDFs");
+        config
+            .rules
+            .insert("pdf".to_string(), "My PDFs".to_string());
+        assert_eq!(resolve_destination(&config, "pdf"), "My PDFs");
+    }
+
+    #[test]
+    fn category_destination_overrides_default() {
+        let mut config = Config::default_with_watch_dir(PathBuf::from("/tmp"));
+        config
+            .category_destinations
+            .insert("Documents".to_string(), "Docs".to_string());
+        assert_eq!(resolve_destination(&config, "pdf"), "Docs");
+    }
+
+    #[test]
+    fn extracts_lowercase_extension() {
+        assert_eq!(extension_of("Report.PDF"), "pdf");
+        assert_eq!(extension_of("noext"), "");
+    }
+}

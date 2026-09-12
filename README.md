@@ -19,6 +19,8 @@ your files.
   folder, remember a rule for that file type, or do nothing.
 - **Batch handling** — files downloaded together are grouped, with an "apply to
   all current downloads" option.
+- **Organize existing files** — review everything already in Downloads, edit the
+  destination per file (or per file type), and move the ones you pick.
 - **Archive extraction** — opt-in, immediate `Extract to [Browse…]` for
   `.zip`/`.tar`/`.tar.gz`/`.tgz`.
 - **Duplicate versioning** — conflicting files move to a `Previous Versions/`

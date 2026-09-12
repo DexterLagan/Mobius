@@ -327,6 +327,44 @@ The settings window has these sections:
 
 A **history panel** lists recent moves and offers undo.
 
+### 5.11 Organize Existing Files
+
+A button in the Downloads view opens an organizer dialog for files already in the
+watched folder (not just newly detected ones). It lists every top-level file
+(hidden files and ignored patterns excluded) with the destination it would move to
+under the current configuration:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Organize existing files                                    Close │
+├──┬───────────────────────┬────────────────────────┬─────────────┤
+│☑ │ report.pdf            │ Documents/PDFs         │    Edit     │
+│☑ │ setup.dmg             │ Apps                   │    Edit     │
+│☐ │ notes.txt             │ Documents/Text Files   │    Edit     │
+├──┴───────────────────────┴────────────────────────┴─────────────┤
+│ 2 of 3 selected          [ Cancel ]   [ Organize selected ]     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+- Columns: selection checkbox, file (name + size), destination, and an **Edit**
+  action. All rows are checked by default; a header checkbox toggles all.
+- **Edit** turns the destination into an editable field with an **Apply to all
+  .ext files** checkbox:
+  - Unchecked → the change is a one-off override for that single file only.
+  - Checked → the change becomes a persisted rule (`rules[ext]`), and every other
+    row with the same extension updates to match. Such rows are tagged `rule`.
+- **Organize selected** moves the selected files using the shown destinations and
+  the configured duplicate policy, records each move in history, and clears moved
+  items from the pending queue.
+- The dialog never moves anything until confirmed.
+
+### 5.12 About
+
+The application exposes an **About Mobius** item in the native application menu.
+On macOS it uses the system About panel (name, version, author). On Windows/Linux
+the menu item opens a native message dialog. It identifies the app as
+"by Dexter Santucci".
+
 ## 6. Error Handling
 
 - File busy / permission denied: leave the file in place, surface a non-blocking

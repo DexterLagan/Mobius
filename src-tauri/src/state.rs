@@ -1,5 +1,5 @@
 use crate::config::Config;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -37,6 +37,25 @@ pub struct Status {
     pub paused: bool,
     pub scanning: bool,
     pub last_scan: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizerItem {
+    pub path: PathBuf,
+    pub file_name: String,
+    pub ext: String,
+    pub size: u64,
+    pub suggested: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizeRequest {
+    pub path: String,
+    pub destination: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 pub struct AppState {

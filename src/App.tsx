@@ -6,6 +6,7 @@ import QueueCard from "./QueueCard";
 import Settings from "./Settings";
 import Rules from "./Rules";
 import HistoryPanel from "./HistoryPanel";
+import Organizer from "./Organizer";
 
 type Tab = "downloads" | "rules" | "history" | "settings";
 
@@ -17,6 +18,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
+  const [showOrganizer, setShowOrganizer] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,6 +45,7 @@ export default function App() {
       listen<HistoryEntry[]>("history:updated", (event) => setHistory(event.payload)),
       listen<string>("move:failed", (event) => setToast(event.payload)),
       listen<QueueItem>("file:detected", () => refresh()),
+      listen("config:updated", () => refresh()),
     ];
     const timer = window.setInterval(refresh, 5000);
 
@@ -125,7 +128,16 @@ export default function App() {
       <main className="content">
         {tab === "downloads" && (
           <div className="panel">
-            <h2>New downloads</h2>
+            <div className="panel-head">
+              <h2>New downloads</h2>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setShowOrganizer(true)}
+              >
+                Organize existing files…
+              </button>
+            </div>
             {queue.length === 0 ? (
               <div className="empty">
                 <p className="muted">
@@ -163,6 +175,14 @@ export default function App() {
             Undo
           </button>
         </div>
+      )}
+
+      {showOrganizer && (
+        <Organizer
+          onClose={() => setShowOrganizer(false)}
+          onDone={refresh}
+          onToast={setToast}
+        />
       )}
 
       {toast && <div className="toast">{toast}</div>}

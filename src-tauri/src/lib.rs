@@ -7,11 +7,12 @@ mod state;
 use classifier::resolve_destination;
 use config::Config;
 use mover::MoveOutcome;
-use state::{AppState, HistoryEntry, QueueItem, Status};
+use state::{AppState, HistoryEntry, OrganizeRequest, OrganizerItem, QueueItem, Status};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
+use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
@@ -214,6 +215,139 @@ fn record_history(app: &AppHandle, outcome: &MoveOutcome, rule: Option<String>) 
 }
 
 #[tauri::command]
+fn scan_downloads(state: State<AppState>) -> Result<Vec<OrganizerItem>, String> {
+    let config = state.config.lock().unwrap().clone();
+    let watch_dir = config.watch_dir.clone();
+    let entries = std::fs::read_dir(&watch_dir)
+        .map_err(|err| format!("cannot read {}: {err}", watch_dir.display()))?;
+
+    let mut items = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        if config.ignored_names.iter().any(|ignored| ignored == &name) {
+            continue;
+        }
+        let ext = classifier::extension_of(&name);
+        if !ext.is_empty()
+            && config
+                .ignored_extensions
+                .iter()
+                .any(|ignored| ignored.eq_ignore_ascii_case(&ext))
+        {
+            continue;
+        }
+        let suggested = resolve_destination(&config, &ext);
+        items.push(OrganizerItem {
+            path,
+            file_name: name,
+            ext,
+            size: metadata.len(),
+            suggested,
+        });
+    }
+
+    items.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
+    Ok(items)
+}
+
+#[tauri::command]
+fn organize_files(
+    app: AppHandle,
+    state: State<AppState>,
+    items: Vec<OrganizeRequest>,
+) -> Result<Vec<MoveOutcome>, String> {
+    let config = state.config.lock().unwrap().clone();
+    let watch_dir = config.watch_dir.clone();
+
+    let mut outcomes = Vec::new();
+    let mut moved_paths: HashSet<PathBuf> = HashSet::new();
+    let mut rules_to_add: Vec<(String, String)> = Vec::new();
+
+    for item in &items {
+        let source = PathBuf::from(&item.path);
+        let destination_dir = match mover::resolve_destination_path(
+            &watch_dir,
+            &item.destination,
+            config.allow_external_destinations,
+        ) {
+            Ok(dir) => dir,
+            Err(err) => {
+                let _ = app.emit("move:failed", format!("{err}: {}", source.display()));
+                continue;
+            }
+        };
+
+        match mover::move_file(
+            &source,
+            &destination_dir,
+            &config.duplicate_policy,
+            config.version_timestamp_prefix,
+        ) {
+            Ok(outcome) => {
+                if outcome.moved {
+                    moved_paths.insert(source.clone());
+                }
+                if item.remember {
+                    let name = source
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let ext = classifier::extension_of(&name);
+                    if !ext.is_empty() {
+                        rules_to_add.push((ext, item.destination.clone()));
+                    }
+                }
+                record_history(
+                    &app,
+                    &outcome,
+                    item.remember.then(|| item.destination.clone()),
+                );
+                outcomes.push(outcome);
+            }
+            Err(err) => {
+                let _ = app.emit("move:failed", format!("{err}: {}", source.display()));
+            }
+        }
+    }
+
+    if !rules_to_add.is_empty() {
+        if let Ok(mut config) = state.config.lock() {
+            for (ext, destination) in rules_to_add {
+                config.rules.insert(ext, destination);
+            }
+            let _ = config.save(&state.config_path);
+        }
+        let _ = app.emit("config:updated", ());
+    }
+
+    if !moved_paths.is_empty() {
+        state
+            .queue
+            .lock()
+            .unwrap()
+            .retain(|item| !moved_paths.contains(&item.path));
+        emit_queue(&app);
+    }
+
+    Ok(outcomes)
+}
+
+#[tauri::command]
 fn undo(app: AppHandle, state: State<AppState>, id: String) -> Result<HistoryEntry, String> {
     let mut history = state.history.lock().unwrap();
     let entry = history
@@ -243,6 +377,63 @@ fn undo(app: AppHandle, state: State<AppState>, id: String) -> Result<HistoryEnt
     drop(history);
     emit_history(&app);
     Ok(updated)
+}
+
+fn build_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
+    #[cfg(target_os = "macos")]
+    let app_menu = Submenu::with_items(
+        app,
+        "Mobius",
+        true,
+        &[
+            &PredefinedMenuItem::about(
+                app,
+                Some("About Mobius"),
+                Some(tauri::menu::AboutMetadata {
+                    name: Some("Mobius".to_string()),
+                    version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                    comments: Some("Automatic download organizer".to_string()),
+                    authors: Some(vec!["Dexter Santucci".to_string()]),
+                    credits: Some("by Dexter Santucci".to_string()),
+                    copyright: Some("© 2026 Dexter Santucci".to_string()),
+                    website: Some("https://github.com/DexterLagan/Mobius".to_string()),
+                    website_label: Some("GitHub".to_string()),
+                    ..Default::default()
+                }),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, Some("Quit Mobius"))?,
+        ],
+    )?;
+
+    #[cfg(not(target_os = "macos"))]
+    let app_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &tauri::menu::MenuItem::with_id(app, "about", "About Mobius", true, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, Some("Quit Mobius"))?,
+        ],
+    )?;
+
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    Menu::with_items(app, &[&app_menu, &edit_menu])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -275,10 +466,31 @@ pub fn run() {
             };
             app.manage(state);
 
+            app.set_menu(build_menu(app)?)?;
+
             let scanner_handle = handle.clone();
             std::thread::spawn(move || scanner::run(scanner_handle));
 
             Ok(())
+        })
+        .on_menu_event(|_app, event| {
+            #[cfg(not(target_os = "macos"))]
+            {
+                if event.id().as_ref() == "about" {
+                    use tauri_plugin_dialog::DialogExt;
+                    _app.dialog()
+                        .message(format!(
+                            "Mobius {}\nAutomatic download organizer\n\nby Dexter Santucci\nhttps://github.com/DexterLagan/Mobius",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .title("About Mobius")
+                        .show(|_| {});
+                }
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = event;
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
@@ -288,7 +500,9 @@ pub fn run() {
             get_status,
             confirm_move,
             dismiss,
-            undo
+            undo,
+            scan_downloads,
+            organize_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
