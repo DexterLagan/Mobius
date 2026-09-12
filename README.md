@@ -62,6 +62,28 @@ disabled for now and will be enabled after initial testing.
 Downloads for macOS (Apple Silicon) and Windows (x64) are attached to the
 [releases](https://github.com/DexterLagan/Mobius/releases).
 
+## Version history
+
+### v0.1.1
+- Added a native **About Mobius** application-menu item — the macOS system About
+  panel, or a native message dialog on Windows/Linux — crediting Dexter Santucci.
+- Added the **Organize existing files** dialog: lists everything already in
+  Downloads alongside its destination, with per-file selection and inline
+  destination editing. An **Apply to all .ext files** checkbox persists the change
+  as a rule.
+- Fixed a Windows-only build error in the application menu setup.
+
+### v0.1.0
+- First functional release.
+- Timed (periodic) Downloads scan with a size-stability readiness gate.
+- Extension-based classification into `Documents/PDFs`, `Documents/Word Files`,
+  `Images`, `Apps`, and more.
+- Confirmation queue with suggested/custom destinations, "apply to all current
+  downloads", and "remember for this file type".
+- Duplicate versioning into a `Previous Versions/` subfolder.
+- Rules manager, per-category destination overrides, and history with undo.
+- Real-time filesystem watcher intentionally not enabled yet.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

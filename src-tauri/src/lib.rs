@@ -412,7 +412,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
         "File",
         true,
         &[
-            &tauri::menu::MenuItem::with_id(app, "about", "About Mobius", true, None)?,
+            &tauri::menu::MenuItem::with_id(app, "about", "About Mobius", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::quit(app, Some("Quit Mobius"))?,
         ],
