@@ -1,0 +1,295 @@
+mod classifier;
+mod config;
+mod mover;
+mod scanner;
+mod state;
+
+use classifier::resolve_destination;
+use config::Config;
+use mover::MoveOutcome;
+use state::{AppState, HistoryEntry, QueueItem, Status};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::SystemTime;
+use tauri::{AppHandle, Emitter, Manager, State};
+use uuid::Uuid;
+
+fn now_ts() -> i64 {
+    chrono::Local::now().timestamp()
+}
+
+pub fn emit_queue(app: &AppHandle) {
+    let queue = app.state::<AppState>().queue.lock().unwrap().clone();
+    let _ = app.emit("queue:updated", queue);
+}
+
+pub fn emit_history(app: &AppHandle) {
+    let history = app.state::<AppState>().history.lock().unwrap().clone();
+    let _ = app.emit("history:updated", history);
+}
+
+#[tauri::command]
+fn get_config(state: State<AppState>) -> Config {
+    state.config.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn set_config(state: State<AppState>, config: Config) -> Result<(), String> {
+    config.save(&state.config_path)?;
+    *state.config.lock().unwrap() = config;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_queue(state: State<AppState>) -> Vec<QueueItem> {
+    state.queue.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn list_history(state: State<AppState>) -> Vec<HistoryEntry> {
+    state.history.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_status(state: State<AppState>) -> Status {
+    let config = state.config.lock().unwrap().clone();
+    let pending = state.queue.lock().unwrap().len();
+    let last_scan = state.last_scan.lock().unwrap().clone();
+    let paused = config
+        .paused_until
+        .map(|until| until > now_ts())
+        .unwrap_or(false);
+    Status {
+        watch_dir: config.watch_dir.display().to_string(),
+        pending,
+        paused,
+        scanning: true,
+        last_scan,
+    }
+}
+
+#[tauri::command]
+fn dismiss(app: AppHandle, state: State<AppState>, path: String) {
+    let target = PathBuf::from(&path);
+    state
+        .queue
+        .lock()
+        .unwrap()
+        .retain(|item| item.path != target);
+    emit_queue(&app);
+}
+
+#[tauri::command]
+fn confirm_move(
+    app: AppHandle,
+    state: State<AppState>,
+    path: String,
+    custom_destination: Option<String>,
+    remember: bool,
+    apply_all: bool,
+) -> Result<Vec<MoveOutcome>, String> {
+    let config = state.config.lock().unwrap().clone();
+    let watch_dir = config.watch_dir.clone();
+
+    let mut targets: Vec<(PathBuf, String, String)> = Vec::new();
+    let mut learned_rule: Option<(String, String)> = None;
+
+    if apply_all {
+        let queue = state.queue.lock().unwrap().clone();
+        for item in queue {
+            let destination = custom_destination
+                .clone()
+                .unwrap_or_else(|| item.suggested.clone());
+            targets.push((item.path, item.ext, destination));
+        }
+    } else {
+        let target = PathBuf::from(&path);
+        let existing = state
+            .queue
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|item| item.path == target)
+            .cloned();
+        let (ext, suggested) = match existing {
+            Some(item) => (item.ext, item.suggested),
+            None => {
+                let name = target
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ext = classifier::extension_of(&name);
+                let suggested = resolve_destination(&config, &ext);
+                (ext, suggested)
+            }
+        };
+        let destination = custom_destination
+            .clone()
+            .unwrap_or_else(|| suggested.clone());
+        if remember {
+            learned_rule = Some((ext.clone(), destination.clone()));
+        }
+        targets.push((target, ext, destination));
+    }
+
+    let mut outcomes = Vec::new();
+    let mut moved_paths: HashSet<PathBuf> = HashSet::new();
+
+    for (source, ext, destination) in targets {
+        let destination_dir = match mover::resolve_destination_path(
+            &watch_dir,
+            &destination,
+            config.allow_external_destinations,
+        ) {
+            Ok(dir) => dir,
+            Err(err) => {
+                let _ = app.emit("move:failed", format!("{err}: {}", source.display()));
+                continue;
+            }
+        };
+
+        match mover::move_file(
+            &source,
+            &destination_dir,
+            &config.duplicate_policy,
+            config.version_timestamp_prefix,
+        ) {
+            Ok(outcome) => {
+                if outcome.moved {
+                    moved_paths.insert(source.clone());
+                }
+                if let Some(rule) = &learned_rule {
+                    if ext == rule.0 {
+                        record_history(&app, &outcome, Some(rule.1.clone()));
+                    } else {
+                        record_history(&app, &outcome, None);
+                    }
+                } else {
+                    record_history(&app, &outcome, None);
+                }
+                outcomes.push(outcome);
+            }
+            Err(err) => {
+                let _ = app.emit("move:failed", format!("{err}: {}", source.display()));
+            }
+        }
+    }
+
+    if let Some((ext, destination)) = learned_rule {
+        if let Ok(mut config) = state.config.lock() {
+            config.rules.insert(ext, destination);
+            let _ = config.save(&state.config_path);
+        }
+    }
+
+    state
+        .queue
+        .lock()
+        .unwrap()
+        .retain(|item| !moved_paths.contains(&item.path));
+    emit_queue(&app);
+
+    Ok(outcomes)
+}
+
+fn record_history(app: &AppHandle, outcome: &MoveOutcome, rule: Option<String>) {
+    let entry = HistoryEntry {
+        id: Uuid::new_v4().to_string(),
+        source: outcome.source.clone(),
+        destination: outcome.destination.clone(),
+        archived: outcome.archived.clone(),
+        rule,
+        timestamp: chrono::Local::now().to_rfc3339(),
+        undone: false,
+    };
+    {
+        let state = app.state::<AppState>();
+        let mut history = state.history.lock().unwrap();
+        history.insert(0, entry);
+        history.truncate(200);
+    }
+    emit_history(app);
+}
+
+#[tauri::command]
+fn undo(app: AppHandle, state: State<AppState>, id: String) -> Result<HistoryEntry, String> {
+    let mut history = state.history.lock().unwrap();
+    let entry = history
+        .iter_mut()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "history entry not found".to_string())?;
+    if entry.undone {
+        return Err("move was already undone".to_string());
+    }
+    if !entry.destination.exists() {
+        return Err("destination no longer exists".to_string());
+    }
+    if entry.source.exists() {
+        return Err("original location is occupied".to_string());
+    }
+    if let Some(parent) = entry.source.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::rename(&entry.destination, &entry.source).map_err(|e| format!("undo failed: {e}"))?;
+    if let Some(archived) = entry.archived.clone() {
+        if archived.exists() {
+            let _ = std::fs::rename(&archived, &entry.destination);
+        }
+    }
+    entry.undone = true;
+    let updated = entry.clone();
+    drop(history);
+    emit_history(&app);
+    Ok(updated)
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let config_dir = app.path().app_config_dir()?;
+            std::fs::create_dir_all(&config_dir)?;
+            let config_path = config_dir.join("config.json");
+            let config = Config::load(&config_path);
+            if !config_path.exists() {
+                let _ = config.save(&config_path);
+            }
+            let _ = std::fs::create_dir_all(&config.watch_dir);
+            let state = AppState {
+                config: Mutex::new(config),
+                config_path,
+                queue: Mutex::new(Vec::new()),
+                seen: Mutex::new(HashSet::new()),
+                history: Mutex::new(Vec::new()),
+                app_start: SystemTime::now(),
+                last_scan: Mutex::new(None),
+            };
+            app.manage(state);
+
+            let scanner_handle = handle.clone();
+            std::thread::spawn(move || scanner::run(scanner_handle));
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_config,
+            set_config,
+            list_queue,
+            list_history,
+            get_status,
+            confirm_move,
+            dismiss,
+            undo
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

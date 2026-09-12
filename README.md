@@ -36,9 +36,28 @@ Rust + [Tauri](https://tauri.app) v2, with a React + TypeScript + Vite frontend.
 
 Full specifications live in [SPECS.md](./SPECS.md).
 
+## Development
+
+Prerequisites: Rust, Node.js, and the platform dependencies required by Tauri.
+
+```sh
+npm install
+npm run tauri dev      # run in development
+npm run tauri build    # produce a local bundle
+```
+
+Cross-platform release builds (macOS Apple Silicon and Windows x64) are produced
+by the workflow in [`.github/workflows/release.yml`](./.github/workflows/release.yml)
+when a `v*` tag is pushed.
+
 ## Status
 
-Early development. The specification is complete; implementation is in progress.
+v0.1.0 is the first functional build. It detects finished downloads with a
+**timed check** (periodic scan); the real-time filesystem watcher is intentionally
+disabled for now and will be enabled after initial testing.
+
+Downloads for macOS (Apple Silicon) and Windows (x64) are attached to the
+[releases](https://github.com/DexterLagan/Mobius/releases).
 
 ## License
 
