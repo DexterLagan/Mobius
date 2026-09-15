@@ -17,9 +17,10 @@ your files.
 
 ## Features
 
-- **Smart monitoring** — a timed scan with a readiness gate that avoids moving
-  files that are still being written. A real-time filesystem watcher is designed
-  in the spec and will be enabled after initial testing.
+- **Real-time monitoring** — native filesystem events (via `notify`), debounced
+  so bursts of writes collapse into one check, plus a periodic reconciliation
+  scan as a fallback. A readiness gate waits for a file's size to stop changing
+  before it enters the queue.
 - **Extension classification** — files map to destinations such as
   `Documents/PDFs`, `Documents/Word Files`, `Images`, and `Apps` for disk images
   and macOS bundles.
@@ -41,7 +42,6 @@ your files.
 
 ### Planned
 
-- Real-time filesystem watching (the timed scan is used for now).
 - Archive extraction — an `Extract to …` option for `.zip`/`.tar`/`.tar.gz`.
 - Launch at login.
 
@@ -70,16 +70,25 @@ is pushed.
 
 ## Status
 
-v0.1.3 adds a system tray with pause/snooze and close-to-tray behavior, on top of
-v0.1.2 (Linux builds), v0.1.1 (native About menu and the "Organize existing files"
-dialog), and v0.1.0, the first functional build. Mobius detects finished downloads
-with a **timed check** (periodic scan); the real-time filesystem watcher is
-intentionally disabled for now and will be enabled after initial testing.
+v0.1.4 enables **real-time filesystem watching** (native OS events, debounced),
+with the periodic timed scan kept as a fallback and reconciliation pass. This
+builds on v0.1.3 (system tray, pause/snooze, close-to-tray), v0.1.2 (Linux builds),
+v0.1.1 (native About menu and the "Organize existing files" dialog), and v0.1.0,
+the first functional build.
 
 Downloads for macOS (Apple Silicon), Windows (x64), and Linux (x64, `.deb` +
 AppImage) are attached to the [releases](https://github.com/DexterLagan/Mobius/releases).
 
 ## Version history
+
+### v0.1.4
+- Enabled real-time filesystem watching using native OS events (`notify`),
+  debounced (default 750 ms) so bursts of writes collapse into a single check.
+- The periodic timed scan is kept as a fallback and reconciliation pass, so
+  detection still works if the watcher is unavailable.
+- Reworked the readiness gate to be time-based: a file is promoted once its size
+  has been stable for 1.5 s, which works with both event-driven and timed checks.
+- The watcher follows the configured watch folder and re-attaches when it changes.
 
 ### v0.1.3
 - Added a system tray icon with a menu: **Open**, **Pause** (30 min / 1 h / 3 h /

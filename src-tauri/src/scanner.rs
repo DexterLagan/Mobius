@@ -2,9 +2,11 @@ use crate::classifier;
 use crate::config::Config;
 use crate::state::{AppState, QueueItem};
 use chrono::Local;
-use std::collections::HashMap;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
@@ -19,20 +21,110 @@ const INCOMPLETE_EXTENSIONS: [&str; 8] = [
     "aria2",
 ];
 
+/// A file must keep the same size for this long before it is considered finished.
+const STABLE_MS: u64 = 1500;
+
+struct Tracked {
+    size: u64,
+    changed_at: Instant,
+}
+
 pub fn run(handle: AppHandle) {
-    let mut tracked: HashMap<PathBuf, (u64, u32)> = HashMap::new();
+    let mut tracked: HashMap<PathBuf, Tracked> = HashMap::new();
+    let mut _watcher: Option<RecommendedWatcher> = None;
+    let mut receiver: Option<Receiver<()>> = None;
+    let mut watched_dir: Option<PathBuf> = None;
+
     loop {
-        let interval = {
+        let (interval, debounce, watch_dir, paused) = {
             let state = handle.state::<AppState>();
             let config = state.config.lock().unwrap();
-            config.scan_interval_ms.max(250)
+            let paused = config
+                .paused_until
+                .map(|until| until > Local::now().timestamp())
+                .unwrap_or(false);
+            (
+                config.scan_interval_ms.max(250),
+                config.debounce_ms.max(50),
+                config.watch_dir.clone(),
+                paused,
+            )
         };
-        std::thread::sleep(Duration::from_millis(interval));
-        scan_once(&handle, &mut tracked);
+
+        if watched_dir.as_deref() != Some(watch_dir.as_path()) {
+            match create_watcher(&watch_dir) {
+                Ok((new_watcher, new_receiver)) => {
+                    log::info!("watching {} for filesystem events", watch_dir.display());
+                    _watcher = Some(new_watcher);
+                    receiver = Some(new_receiver);
+                }
+                Err(err) => {
+                    log::warn!(
+                        "filesystem events unavailable for {}: {err}; using timed scan only",
+                        watch_dir.display()
+                    );
+                    _watcher = None;
+                    receiver = None;
+                }
+            }
+            watched_dir = Some(watch_dir);
+        }
+
+        if paused {
+            std::thread::sleep(Duration::from_millis(interval));
+            continue;
+        }
+
+        let should_scan = match receiver.as_ref() {
+            Some(rx) => match rx.recv_timeout(Duration::from_millis(interval)) {
+                Ok(()) => {
+                    drain_burst(rx, debounce);
+                    true
+                }
+                Err(RecvTimeoutError::Timeout) => true,
+                Err(RecvTimeoutError::Disconnected) => {
+                    log::warn!("filesystem watcher stopped; using timed scan only");
+                    _watcher = None;
+                    receiver = None;
+                    std::thread::sleep(Duration::from_millis(interval));
+                    true
+                }
+            },
+            None => {
+                std::thread::sleep(Duration::from_millis(interval));
+                true
+            }
+        };
+
+        if should_scan {
+            scan_once(&handle, &mut tracked);
+        }
     }
 }
 
-fn scan_once(handle: &AppHandle, tracked: &mut HashMap<PathBuf, (u64, u32)>) {
+fn create_watcher(dir: &Path) -> notify::Result<(RecommendedWatcher, Receiver<()>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        if result.is_ok() {
+            let _ = tx.send(());
+        }
+    })?;
+    watcher.watch(dir, RecursiveMode::NonRecursive)?;
+    Ok((watcher, rx))
+}
+
+/// Collapse a burst of filesystem events into a single scan. Waits until the
+/// events stop arriving or `debounce_ms` elapses, whichever comes first.
+fn drain_burst(rx: &Receiver<()>, debounce_ms: u64) {
+    let deadline = Instant::now() + Duration::from_millis(debounce_ms);
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        if rx.recv_timeout(remaining).is_err() {
+            break;
+        }
+    }
+}
+
+fn scan_once(handle: &AppHandle, tracked: &mut HashMap<PathBuf, Tracked>) {
     let (config, watch_dir, app_start, seen) = {
         let state = handle.state::<AppState>();
         let config = state.config.lock().unwrap().clone();
@@ -57,7 +149,8 @@ fn scan_once(handle: &AppHandle, tracked: &mut HashMap<PathBuf, (u64, u32)>) {
         }
     };
 
-    let mut present: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let now = Instant::now();
+    let mut present: HashSet<PathBuf> = HashSet::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -100,14 +193,29 @@ fn scan_once(handle: &AppHandle, tracked: &mut HashMap<PathBuf, (u64, u32)>) {
 
         present.insert(path.clone());
         let size = metadata.len();
-        let tracked_entry = tracked.entry(path.clone()).or_insert((size, 0));
-        if tracked_entry.0 == size {
-            tracked_entry.1 += 1;
-        } else {
-            tracked_entry.0 = size;
-            tracked_entry.1 = 0;
-        }
-        if tracked_entry.1 >= 1 {
+        let ready = match tracked.get_mut(&path) {
+            Some(entry) => {
+                if entry.size != size {
+                    entry.size = size;
+                    entry.changed_at = now;
+                    false
+                } else {
+                    now.duration_since(entry.changed_at) >= Duration::from_millis(STABLE_MS)
+                }
+            }
+            None => {
+                tracked.insert(
+                    path.clone(),
+                    Tracked {
+                        size,
+                        changed_at: now,
+                    },
+                );
+                false
+            }
+        };
+
+        if ready {
             tracked.remove(&path);
             promote(handle, &config, &path, &name, &ext, size);
         }
@@ -133,6 +241,7 @@ fn promote(handle: &AppHandle, config: &Config, path: &Path, name: &str, ext: &s
         state.seen.lock().unwrap().insert(path.to_path_buf());
         state.queue.lock().unwrap().push(item.clone());
     }
+    log::info!("detected {} → suggested {}", name, item.suggested);
     let _ = handle.emit("file:detected", &item);
     crate::emit_queue(handle);
 }
