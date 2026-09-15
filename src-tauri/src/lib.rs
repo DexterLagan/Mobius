@@ -526,6 +526,15 @@ fn build_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("another instance was launched; focusing the existing window");
+            show_main(app);
+            use tauri_plugin_dialog::DialogExt;
+            app.dialog()
+                .message("Mobius is already running. Its window has been brought to the front.")
+                .title("Mobius is already running")
+                .show(|_| {});
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::default()

@@ -38,6 +38,8 @@ your files.
 - **Close to tray** — closing the window hides Mobius instead of quitting, so it
   keeps running in the background.
 - **Native About menu** — an About item crediting the author.
+- **Single instance** — launching Mobius again focuses the existing window and
+  shows a message instead of starting a duplicate.
 - **History & undo** — reverse recent moves from a toast or the history panel.
 
 ### Planned
@@ -70,16 +72,21 @@ is pushed.
 
 ## Status
 
-v0.1.4 enables **real-time filesystem watching** (native OS events, debounced),
-with the periodic timed scan kept as a fallback and reconciliation pass. This
-builds on v0.1.3 (system tray, pause/snooze, close-to-tray), v0.1.2 (Linux builds),
-v0.1.1 (native About menu and the "Organize existing files" dialog), and v0.1.0,
-the first functional build.
+v0.1.5 adds single-instance protection, so launching Mobius again focuses the
+existing window instead of opening a duplicate. It builds on v0.1.4 (real-time
+filesystem watching), v0.1.3 (system tray, pause/snooze, close-to-tray), v0.1.2
+(Linux builds), v0.1.1 (native About menu and the "Organize existing files"
+dialog), and v0.1.0, the first functional build.
 
 Downloads for macOS (Apple Silicon), Windows (x64), and Linux (x64, `.deb` +
 AppImage) are attached to the [releases](https://github.com/DexterLagan/Mobius/releases).
 
 ## Version history
+
+### v0.1.5
+- Added single-instance protection: launching Mobius again no longer opens a
+  second window or adds another tray icon. The already-running instance is
+  brought to the front with a message, and the new process exits.
 
 ### v0.1.4
 - Enabled real-time filesystem watching using native OS events (`notify`),
