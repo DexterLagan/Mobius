@@ -2,33 +2,48 @@
 
 Mobius is a cross-platform desktop app that watches your Downloads folder,
 detects newly completed files, and asks how you'd like to organize them. Move
-files to sensible category folders, set up remembered rules for the types you
-care about, extract archives, and undo anything with a click.
+files to sensible category folders, remember rules for the types you care about,
+review and organize what's already in Downloads, and undo anything with a click.
+It lives in the system tray, so it can keep working quietly in the background.
 
 It is local-only: no network, no telemetry, no accounts. Mobius never deletes
 your files.
 
+![Mobius asking where to move a new download](docs/screenshots/mobius-new-file.png)
+
+![Mobius rules and category destinations](docs/screenshots/mobius-rules.png)
+
+![Mobius settings](docs/screenshots/mobius-settings.png)
+
 ## Features
 
-- **Smart monitoring** — native filesystem events with debounce, a readiness gate
-  that avoids moving files still being written, and a periodic reconciliation scan.
+- **Smart monitoring** — a timed scan with a readiness gate that avoids moving
+  files that are still being written. A real-time filesystem watcher is designed
+  in the spec and will be enabled after initial testing.
 - **Extension classification** — files map to destinations such as
   `Documents/PDFs`, `Documents/Word Files`, `Images`, and `Apps` for disk images
   and macOS bundles.
-- **Simple confirmation dialog** — move to the suggested folder, choose a custom
-  folder, remember a rule for that file type, or do nothing.
-- **Batch handling** — files downloaded together are grouped, with an "apply to
-  all current downloads" option.
+- **Confirmation dialog** — move to the suggested folder, choose a custom folder,
+  remember a rule for that file type, or do nothing. Batch downloads can be
+  applied all at once.
 - **Organize existing files** — review everything already in Downloads, edit the
   destination per file (or per file type), and move the ones you pick.
-- **Archive extraction** — opt-in, immediate `Extract to [Browse…]` for
-  `.zip`/`.tar`/`.tar.gz`/`.tgz`.
 - **Duplicate versioning** — conflicting files move to a `Previous Versions/`
   subfolder instead of being overwritten.
 - **Rules manager & overrides** — inspect learned rules and tune destinations by
   extension or whole category.
-- **Tray, pause/snooze, and launch at login** — quiet background operation.
+- **System tray** — a menu with Open, Pause (30 min / 1 h / 3 h / until resumed),
+  Resume, Recent moves, Settings, and Quit.
+- **Close to tray** — closing the window hides Mobius instead of quitting, so it
+  keeps running in the background.
+- **Native About menu** — an About item crediting the author.
 - **History & undo** — reverse recent moves from a toast or the history panel.
+
+### Planned
+
+- Real-time filesystem watching (the timed scan is used for now).
+- Archive extraction — an `Extract to …` option for `.zip`/`.tar`/`.tar.gz`.
+- Launch at login.
 
 ## Tech stack
 
@@ -48,9 +63,10 @@ npm run tauri dev      # run in development
 npm run tauri build    # produce a local bundle
 ```
 
-Cross-platform release builds (macOS Apple Silicon and Windows x64) are produced
-by the workflow in [`.github/workflows/release.yml`](./.github/workflows/release.yml)
-when a `v*` tag is pushed.
+Cross-platform release builds (macOS Apple Silicon, Windows x64, and Linux x64)
+are produced by the workflow in
+[`.github/workflows/release.yml`](./.github/workflows/release.yml) when a `v*` tag
+is pushed.
 
 ## Status
 
