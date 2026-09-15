@@ -46,6 +46,13 @@ export default function App() {
       listen<string>("move:failed", (event) => setToast(event.payload)),
       listen<QueueItem>("file:detected", () => refresh()),
       listen("config:updated", () => refresh()),
+      listen("paused:updated", () => refresh()),
+      listen<string>("navigate", (event) => {
+        const target = event.payload as Tab;
+        if (["downloads", "rules", "history", "settings"].includes(target)) {
+          setTab(target);
+        }
+      }),
     ];
     const timer = window.setInterval(refresh, 5000);
 
@@ -120,6 +127,7 @@ export default function App() {
       <div className="statusbar">
         <span title={status?.watchDir}>Watching {status?.watchDir}</span>
         <span className="dot" /> {queue.length} pending
+        {status?.paused && <span className="badge">Paused</span>}
         {status?.lastScan && (
           <span className="muted">· last check {new Date(status.lastScan).toLocaleTimeString()}</span>
         )}

@@ -12,8 +12,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
-use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use uuid::Uuid;
 
 fn now_ts() -> i64 {
@@ -379,6 +380,92 @@ fn undo(app: AppHandle, state: State<AppState>, id: String) -> Result<HistoryEnt
     Ok(updated)
 }
 
+fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn set_paused_until(app: &AppHandle, until: Option<i64>) {
+    let state = app.state::<AppState>();
+    if let Ok(mut config) = state.config.lock() {
+        config.paused_until = until;
+        let _ = config.save(&state.config_path);
+    }
+    let _ = app.emit("paused:updated", ());
+}
+
+fn handle_tray_menu(app: &AppHandle, event: MenuEvent) {
+    match event.id().as_ref() {
+        "open" => show_main(app),
+        "settings" => {
+            show_main(app);
+            let _ = app.emit("navigate", "settings");
+        }
+        "recent" => {
+            show_main(app);
+            let _ = app.emit("navigate", "history");
+        }
+        "resume" => set_paused_until(app, None),
+        "pause_30" => set_paused_until(app, Some(now_ts() + 30 * 60)),
+        "pause_60" => set_paused_until(app, Some(now_ts() + 60 * 60)),
+        "pause_180" => set_paused_until(app, Some(now_ts() + 3 * 60 * 60)),
+        "pause_indef" => set_paused_until(app, Some(i64::MAX)),
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<TrayIcon> {
+    let open = MenuItem::with_id(app, "open", "Open Mobius", true, None::<&str>)?;
+    let pause_30 = MenuItem::with_id(app, "pause_30", "For 30 minutes", true, None::<&str>)?;
+    let pause_60 = MenuItem::with_id(app, "pause_60", "For 1 hour", true, None::<&str>)?;
+    let pause_180 = MenuItem::with_id(app, "pause_180", "For 3 hours", true, None::<&str>)?;
+    let pause_indef = MenuItem::with_id(app, "pause_indef", "Until resumed", true, None::<&str>)?;
+    let pause = Submenu::with_items(
+        app,
+        "Pause",
+        true,
+        &[&pause_30, &pause_60, &pause_180, &pause_indef],
+    )?;
+    let resume = MenuItem::with_id(app, "resume", "Resume", true, None::<&str>)?;
+    let recent = MenuItem::with_id(app, "recent", "Recent moves", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Mobius", true, None::<&str>)?;
+
+    let menu = Menu::with_items(
+        app,
+        &[
+            &open,
+            &pause,
+            &resume,
+            &PredefinedMenuItem::separator(app)?,
+            &recent,
+            &settings,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+
+    let mut builder = TrayIconBuilder::with_id("main")
+        .menu(&menu)
+        .tooltip("Mobius — automatic download organizer")
+        .on_menu_event(handle_tray_menu)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::DoubleClick { .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    builder.build(app)
+}
+
 fn build_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     #[cfg(target_os = "macos")]
     let app_menu = Submenu::with_items(
@@ -467,11 +554,19 @@ pub fn run() {
             app.manage(state);
 
             app.set_menu(build_menu(app)?)?;
+            let tray = build_tray(&handle)?;
+            app.manage(tray);
 
             let scanner_handle = handle.clone();
             std::thread::spawn(move || scanner::run(scanner_handle));
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .on_menu_event(|_app, event| {
             #[cfg(not(target_os = "macos"))]

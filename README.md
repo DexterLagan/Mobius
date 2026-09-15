@@ -54,16 +54,23 @@ when a `v*` tag is pushed.
 
 ## Status
 
-v0.1.2 adds Linux builds on top of v0.1.1 (native About menu and the "Organize
-existing files" dialog) and v0.1.0, the first functional build. Mobius detects
-finished downloads with a **timed check** (periodic scan); the real-time
-filesystem watcher is intentionally disabled for now and will be enabled after
-initial testing.
+v0.1.3 adds a system tray with pause/snooze and close-to-tray behavior, on top of
+v0.1.2 (Linux builds), v0.1.1 (native About menu and the "Organize existing files"
+dialog), and v0.1.0, the first functional build. Mobius detects finished downloads
+with a **timed check** (periodic scan); the real-time filesystem watcher is
+intentionally disabled for now and will be enabled after initial testing.
 
 Downloads for macOS (Apple Silicon), Windows (x64), and Linux (x64, `.deb` +
 AppImage) are attached to the [releases](https://github.com/DexterLagan/Mobius/releases).
 
 ## Version history
+
+### v0.1.3
+- Added a system tray icon with a menu: **Open**, **Pause** (30 min / 1 h / 3 h /
+  until resumed), **Resume**, **Recent moves**, **Settings**, and **Quit**.
+- Closing the window now hides Mobius to the tray; quit explicitly from the tray
+  or the application menu.
+- The status bar indicates when monitoring is paused.
 
 ### v0.1.2
 - Added Linux (x64) release builds: `.deb` and `.AppImage`.
