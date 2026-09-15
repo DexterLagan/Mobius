@@ -54,15 +54,22 @@ when a `v*` tag is pushed.
 
 ## Status
 
-v0.1.1 adds the native About menu and the "Organize existing files" dialog on top
-of v0.1.0, the first functional build. Mobius detects finished downloads with a
-**timed check** (periodic scan); the real-time filesystem watcher is intentionally
-disabled for now and will be enabled after initial testing.
+v0.1.2 adds Linux builds on top of v0.1.1 (native About menu and the "Organize
+existing files" dialog) and v0.1.0, the first functional build. Mobius detects
+finished downloads with a **timed check** (periodic scan); the real-time
+filesystem watcher is intentionally disabled for now and will be enabled after
+initial testing.
 
-Downloads for macOS (Apple Silicon) and Windows (x64) are attached to the
-[releases](https://github.com/DexterLagan/Mobius/releases).
+Downloads for macOS (Apple Silicon), Windows (x64), and Linux (x64, `.deb` +
+AppImage) are attached to the [releases](https://github.com/DexterLagan/Mobius/releases).
 
 ## Version history
+
+### v0.1.2
+- Added Linux (x64) release builds: `.deb` and `.AppImage`.
+- Verified Linux support in CI: builds and unit tests pass on Ubuntu 22.04.
+- Downloads folder resolution on Linux uses the XDG user dirs
+  (`XDG_DOWNLOAD_DIR`), falling back to `$HOME/Downloads`.
 
 ### v0.1.1
 - Added a native **About Mobius** application-menu item — the macOS system About
